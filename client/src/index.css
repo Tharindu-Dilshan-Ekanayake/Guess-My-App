@@ -85,6 +85,7 @@ canvas {
   }
 }
 .wiggle {
+  will-change: transform;
   animation: wiggle 1.2s ease-in-out infinite;
 }
 
@@ -303,6 +304,7 @@ canvas {
   }
 }
 .reveal-pulse {
+  will-change: transform;
   animation: reveal-pulse 0.45s ease-in-out infinite;
 }
 @keyframes arrow-up {
@@ -478,18 +480,31 @@ canvas {
 }
 
 /* ---- Duel VS bar ----------------------------------------------------------------- */
-/* Whose turn it is: a pulsing gold ring round their card. */
+/*
+ * Whose turn it is: a gold ring round their card with a pulsing glow. The glow is a
+ * static shadow on its own layer whose opacity animates, so the pulse runs on the
+ * compositor; animating box-shadow itself repainted the card every frame.
+ */
 .turn-ring {
-  box-shadow:
-    0 0 0 3px #ffd23d,
-    0 0 14px 3px rgba(255, 210, 61, 0.7);
+  position: relative;
+  box-shadow: 0 0 0 3px #ffd23d;
+}
+.turn-ring::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: 0 0 14px 3px rgba(255, 210, 61, 0.7);
+  pointer-events: none;
+  will-change: opacity;
   animation: turn-pulse 1s ease-in-out infinite alternate;
 }
 @keyframes turn-pulse {
+  from {
+    opacity: 1;
+  }
   to {
-    box-shadow:
-      0 0 0 3px #ffd23d,
-      0 0 4px 1px rgba(255, 210, 61, 0.4);
+    opacity: 0.3;
   }
 }
 /* Speech bubble tail pointing up at the card. */
@@ -545,4 +560,22 @@ canvas {
   .touch-pad-pos {
     left: 6.75rem;
   }
+}
+
+/* ---- Guess My App duel ----------------------------------------------------------- */
+/* Emotes and Quit sit on the sides, clear of the turn buttons along the bottom. */
+.emote-pos,
+.quit-pos {
+  top: 34%;
+}
+@media (orientation: portrait) {
+  .emote-pos,
+  .quit-pos {
+    top: 15%;
+  }
+}
+/* 149 inline-SVG app cards: off-screen ones are skipped until scrolled to. */
+.app-card {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 7rem;
 }

@@ -179,6 +179,12 @@ function LeftTiles({ profile, now }) {
           onClick={() => open('items')}
         />
         <Tile
+          label="APPS"
+          icon="📱"
+          gradient="bg-gradient-to-b from-[#5dffd0] via-[#1ec9a8] to-[#0b8f8a]"
+          onClick={() => open('apps')}
+        />
+        <Tile
           label={giftReady ? 'OPEN!' : 'REWARDS'}
           icon="🎁"
           gradient="bg-gradient-to-b from-[#ff4fd8] via-[#c64dff] to-[#8a3dff]"

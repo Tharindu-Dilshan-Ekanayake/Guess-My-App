@@ -20,6 +20,15 @@ const KEY_MAP = {
   ShiftRight: 'sprint',
 }
 
+/**
+ * True while the player is typing in a text field (the app search boxes): game keys
+ * must then neither move the avatar nor swallow the letters (W, A, S, D, E…).
+ */
+export function isTyping(e) {
+  const el = e.target
+  return Boolean(el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable))
+}
+
 export function useKeyboard() {
   const keys = useRef({
     forward: false,
@@ -37,6 +46,7 @@ export function useKeyboard() {
     }
 
     const onKeyDown = (e) => {
+      if (isTyping(e)) return
       if (KEY_MAP[e.code]) e.preventDefault() // stop Space scrolling the page
       set(e.code, true)
     }

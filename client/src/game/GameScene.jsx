@@ -1,6 +1,6 @@
 import { PerformanceMonitor } from '@react-three/drei'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { NearestFilter } from 'three'
 
 import { useBloxity } from '../bloxity/BloxityContext'
@@ -39,6 +39,7 @@ function FirstFrameSignal({ onFirstFrame }) {
 function measureTextures(scene) {
   const seen = new Set()
   let bytes = 0
+  let maxSize = 0
   scene.traverse((o) => {
     const materials = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : []
     for (const m of materials) {
@@ -47,9 +48,10 @@ function measureTextures(scene) {
       seen.add(t)
       const mips = t.generateMipmaps && t.minFilter !== NearestFilter ? 4 / 3 : 1
       bytes += t.image.width * t.image.height * 4 * mips
+      maxSize = Math.max(maxSize, t.image.width, t.image.height)
     }
   })
-  return { count: seen.size, bytes }
+  return { count: seen.size, bytes, maxSize }
 }
 
 /**
@@ -58,11 +60,19 @@ function measureTextures(scene) {
  */
 function RenderStats() {
   const scene = useThree((s) => s.scene)
+  const camera = useThree((s) => s.camera)
   const frames = useRef({ count: 0, since: 0 })
   useEffect(() => {
     window.__textureMemory = () => measureTextures(scene)
-    return () => delete window.__textureMemory
-  }, [scene])
+    window.__renderStats = renderStats
+    // Dev only: lets automated play tests project board tiles to screen taps.
+    if (import.meta.env.DEV) window.__camera = camera
+    return () => {
+      delete window.__textureMemory
+      delete window.__renderStats
+      delete window.__camera
+    }
+  }, [scene, camera])
   useFrame(({ gl }) => {
     // Read before this frame renders: these are the previous frame's totals.
     renderStats.calls = gl.info.render.calls
@@ -148,6 +158,16 @@ function ViewDistance({ distance }) {
   }, [camera, scene, distance])
   return null
 }
+
+/**
+ * r3f-perf overlay (draw calls, triangles, GPU/CPU time) in development only, with
+ * `?perf` in the URL. In a production build `import.meta.env.DEV` is false, so the
+ * import is dropped and r3f-perf never reaches the bundle.
+ */
+const DevPerf =
+  import.meta.env.DEV && new URLSearchParams(window.location.search).has('perf')
+    ? lazy(() => import('r3f-perf').then((m) => ({ default: () => <m.Perf position="bottom-right" /> })))
+    : null
 
 export function GameScene({ onReady }) {
   const { game } = useBloxity()
@@ -245,6 +265,11 @@ export function GameScene({ onReady }) {
         <CullingSystem />
         {extras === 'warming' && <ShaderWarmup onDone={extrasReady} />}
         <RenderStats />
+        {DevPerf && (
+          <Suspense fallback={null}>
+            <DevPerf />
+          </Suspense>
+        )}
         <FirstFrameSignal onFirstFrame={endLoading} />
       </Canvas>
 

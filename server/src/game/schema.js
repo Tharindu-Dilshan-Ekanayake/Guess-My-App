@@ -4,7 +4,7 @@ const { schema, t } = require('@colyseus/schema')
  * Synchronised room state. Colyseus diffs it and sends only changed fields to every
  * client at the room's patch rate.
  *
- * Only public information lives here. Each player's secret number, their duel
+ * Only public information lives here. Each player's secret app, their duel
  * view and their profile (cash, inventory) go to that player alone as messages.
  */
 
@@ -52,6 +52,9 @@ const TableState = schema(
     winner: t.string(),
     /** Server epoch ms when the current phase times out (0 when it doesn't). */
     endsAt: t.float64(),
+    /** Tiles each seat has opened on its board, as hex bitmasks ('' = none). Not what's under them. */
+    rev0: t.string(),
+    rev1: t.string(),
   },
   'Table',
 )

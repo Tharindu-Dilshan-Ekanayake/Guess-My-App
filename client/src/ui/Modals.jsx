@@ -7,6 +7,7 @@ import { useQuality } from '../game/quality'
 import { GRAPHICS, setCameraSpeed, setGraphics, setMusicVolume, setShowFps, setVolume } from '../game/userSettings'
 import { useGame } from '../net/gameStore'
 import { send } from '../net/api'
+import { AppStore, AppStoreTabs } from './AppStore'
 import { clock, money, useNow } from './format'
 
 /** The chunky teal-framed window used by every menu, with the red X. */
@@ -252,7 +253,7 @@ function PassRows({ profile }) {
         icon={<span className="text-[2.4rem]">⭐</span>}
         title="STARTER PACK"
         titleClass="text-[#ffe23d]"
-        sub={`${packChair.name} + ${pack.emotes.length} emotes`}
+        sub={`${(pack.apps || []).length} Epic apps + ${packChair.name} + ${pack.emotes.length} emotes`}
         action={
           profile.starterPack ? (
             <ActionButton label="OWNED" variant="owned" disabled />
@@ -545,10 +546,12 @@ function QuestsModal({ profile }) {
 }
 
 const HELP_STEPS = [
-  ['🚶', 'Walk to a table', 'Use WASD (or the joystick on phones). Walk up to a table and press E (or tap "Play").'],
-  ['🤔', 'Pick a secret number', 'When a second player sits down, you both pick a number from 1 to 100. Keep it secret!'],
-  ['🎯', 'Take turns guessing', "Guess your opponent's number. After each guess you see HIGHER ⬆ or LOWER ⬇. Wrong numbers get crossed out."],
-  ['🏆', 'First to guess wins', `Guess right first to win $${DATA.winReward}. Even if you lose, you get $${DATA.lossReward} and XP for playing.`],
+  ['🚶', 'Walk to a table', 'Use WASD (or the joystick on phones). Walk up to a table and press E (or tap "Play"). NORMAL, MEDIUM and HARD tables pay more and have more tiles.'],
+  ['📱', 'Pick a secret app', 'When a second player sits down, you both secretly choose one of your apps. Your opponent has to guess it!'],
+  ['🔲', 'Flip tiles', "Each turn, tap one tile on your board to flip it and reveal a piece of your opponent's app. Study the colours and shapes!"],
+  ['🎯', 'Guess or skip', 'Think you know it? Tap GUESS and pick the app. A wrong guess ends your turn, so be sure, or tap SKIP.'],
+  ['🏆', 'First to guess wins', `Guess right first to win up to $${DATA.modes.hard.reward}. Even if you lose, you get $${DATA.lossReward} and XP for playing.`],
+  ['🛒', 'Collect apps', 'Buy more logos in the App Store or open an App Crate. Rare apps are harder for your opponent to recognise!'],
   ['🤖', 'Nobody to play?', 'Sit at a table and tap PLAY BOT. A practice bot joins you (half rewards, no leaderboard points).'],
   ['⭐', 'Level up', 'Every duel gives XP. Each new level pays cash, and some unlock cool titles for your name.'],
   ['📜', 'Quests & gifts', 'Finish 3 daily quests, open a free gift every 10 minutes, and claim your daily reward.'],
@@ -559,7 +562,7 @@ const HELP_STEPS = [
 /** "How to play" in plain English. Opens by itself on a player's first visit. */
 function HelpModal() {
   return (
-    <Frame title="How to Play 🤔">
+    <Frame title="How to Play 📱">
       {HELP_STEPS.map(([icon, title, text], i) => (
         <div key={title} className="flex items-start gap-3 rounded-xl border-[3px] border-black/50 bg-[#123540] px-3 py-2">
           <span className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-white/10 text-[1.8rem]">{icon}</span>
@@ -596,5 +599,11 @@ export default function Modals() {
   if (modal === 'settings') return <SettingsModal />
   if (modal === 'quests') return <QuestsModal profile={profile} />
   if (modal === 'help') return <HelpModal />
+  if (modal === 'apps')
+    return (
+      <Frame title="App Store 📱" tabs={<AppStoreTabs />}>
+        <AppStore profile={profile} />
+      </Frame>
+    )
   return null
 }

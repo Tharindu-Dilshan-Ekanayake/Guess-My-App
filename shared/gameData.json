@@ -1,6 +1,6 @@
 {
   "bloxity": {
-    "gameSlug": "guess-my-number",
+    "gameSlug": "guess-my-app",
     "roomName": "game",
     "leaderboards": [
       {
@@ -46,47 +46,183 @@
     "enabled": true,
     "maxBots": 10,
     "rewardScale": 0.5,
-    "names": ["Max", "Luna", "Zed", "Mira", "Kai", "Nova", "Rex", "Pip", "Juno", "Otto", "Remy", "Skye"]
+    "names": [
+      "Max",
+      "Luna",
+      "Zed",
+      "Mira",
+      "Kai",
+      "Nova",
+      "Rex",
+      "Pip",
+      "Juno",
+      "Otto",
+      "Remy",
+      "Skye"
+    ]
   },
-  "numberMin": 1,
-  "numberMax": 100,
-  "winReward": 200,
+  "modes": {
+    "normal": {
+      "label": "NORMAL",
+      "color": "#5cff5c",
+      "grid": 6,
+      "reward": 200,
+      "botTier": 2,
+      "bot": {
+        "threshold": 0.34,
+        "wild": 0.05
+      }
+    },
+    "medium": {
+      "label": "MEDIUM",
+      "color": "#ffd23d",
+      "grid": 8,
+      "reward": 500,
+      "botTier": 3,
+      "bot": {
+        "threshold": 0.24,
+        "wild": 0.06
+      }
+    },
+    "hard": {
+      "label": "HARD",
+      "color": "#ff5a5a",
+      "grid": 10,
+      "reward": 750,
+      "botTier": 4,
+      "bot": {
+        "threshold": 0.17,
+        "wild": 0.07
+      }
+    }
+  },
+  "board": {
+    "size": 1.1,
+    "seatOffset": 0.86
+  },
+  "appCrate": {
+    "price": 300,
+    "weights": {
+      "2": 60,
+      "3": 32,
+      "4": 8
+    }
+  },
   "timing": {
     "countdown": 3,
     "choose": 20,
     "turn": 15,
     "results": 4,
-    "guessReveal": 1.2,
+    "guessReveal": 1.4,
     "loserRespawn": 2
   },
   "world": {
     "half": 31,
-    "spawn": [0, 0, 23]
+    "spawn": [
+      0,
+      0,
+      23
+    ]
   },
   "table": {
     "width": 3.6,
     "depth": 1.3,
     "height": 0.82,
     "seatX": 0.8,
-    "seatZ": 1.0,
+    "seatZ": 1,
     "sitRange": 4
   },
   "tables": [
-    { "id": 1, "x": -17, "z": -4 },
-    { "id": 2, "x": -8.5, "z": -4 },
-    { "id": 3, "x": 0, "z": -4 },
-    { "id": 4, "x": 8.5, "z": -4 },
-    { "id": 5, "x": 17, "z": -4 },
-    { "id": 6, "x": -17, "z": 6 },
-    { "id": 7, "x": -8.5, "z": 6 },
-    { "id": 8, "x": 0, "z": 6 },
-    { "id": 9, "x": 8.5, "z": 6 },
-    { "id": 10, "x": 17, "z": 6 },
-    { "id": 11, "x": -17, "z": -14 },
-    { "id": 12, "x": -8.5, "z": -14 },
-    { "id": 13, "x": 0, "z": -14 },
-    { "id": 14, "x": 8.5, "z": -14 },
-    { "id": 15, "x": 17, "z": -14 }
+    {
+      "id": 1,
+      "x": -17,
+      "z": -4,
+      "mode": "medium"
+    },
+    {
+      "id": 2,
+      "x": -8.5,
+      "z": -4,
+      "mode": "medium"
+    },
+    {
+      "id": 3,
+      "x": 0,
+      "z": -4,
+      "mode": "medium"
+    },
+    {
+      "id": 4,
+      "x": 8.5,
+      "z": -4,
+      "mode": "medium"
+    },
+    {
+      "id": 5,
+      "x": 17,
+      "z": -4,
+      "mode": "medium"
+    },
+    {
+      "id": 6,
+      "x": -17,
+      "z": 6,
+      "mode": "normal"
+    },
+    {
+      "id": 7,
+      "x": -8.5,
+      "z": 6,
+      "mode": "normal"
+    },
+    {
+      "id": 8,
+      "x": 0,
+      "z": 6,
+      "mode": "normal"
+    },
+    {
+      "id": 9,
+      "x": 8.5,
+      "z": 6,
+      "mode": "normal"
+    },
+    {
+      "id": 10,
+      "x": 17,
+      "z": 6,
+      "mode": "normal"
+    },
+    {
+      "id": 11,
+      "x": -17,
+      "z": -14,
+      "mode": "hard"
+    },
+    {
+      "id": 12,
+      "x": -8.5,
+      "z": -14,
+      "mode": "hard"
+    },
+    {
+      "id": 13,
+      "x": 0,
+      "z": -14,
+      "mode": "hard"
+    },
+    {
+      "id": 14,
+      "x": 8.5,
+      "z": -14,
+      "mode": "hard"
+    },
+    {
+      "id": 15,
+      "x": 17,
+      "z": -14,
+      "mode": "hard"
+    }
   ],
   "leaderboards": [
     {
@@ -134,7 +270,10 @@
       "rarity": "common",
       "price": 100,
       "color": "#8a96a8",
-      "shop": [24.6, -10]
+      "shop": [
+        24.6,
+        -10
+      ]
     },
     {
       "id": "picnic",
@@ -142,7 +281,10 @@
       "rarity": "common",
       "price": 300,
       "color": "#e8504a",
-      "shop": [28.4, -10]
+      "shop": [
+        28.4,
+        -10
+      ]
     },
     {
       "id": "nature",
@@ -150,7 +292,10 @@
       "rarity": "uncommon",
       "price": 800,
       "color": "#2fd14f",
-      "shop": [24.6, -5]
+      "shop": [
+        24.6,
+        -5
+      ]
     },
     {
       "id": "candy",
@@ -158,7 +303,10 @@
       "rarity": "uncommon",
       "price": 1200,
       "color": "#ff7fc8",
-      "shop": [28.4, -5]
+      "shop": [
+        28.4,
+        -5
+      ]
     },
     {
       "id": "storm",
@@ -166,7 +314,10 @@
       "rarity": "rare",
       "price": 2000,
       "color": "#7fe3ff",
-      "shop": [24.6, 0]
+      "shop": [
+        24.6,
+        0
+      ]
     },
     {
       "id": "ocean",
@@ -174,7 +325,10 @@
       "rarity": "rare",
       "price": 3000,
       "color": "#2f7dff",
-      "shop": [28.4, 0]
+      "shop": [
+        28.4,
+        0
+      ]
     },
     {
       "id": "lava",
@@ -182,7 +336,10 @@
       "rarity": "epic",
       "price": 5000,
       "color": "#ff5a1f",
-      "shop": [24.6, 5]
+      "shop": [
+        24.6,
+        5
+      ]
     },
     {
       "id": "golden",
@@ -191,7 +348,10 @@
       "price": 9000,
       "color": "#ffc93d",
       "style": "throne",
-      "shop": [28.4, 5]
+      "shop": [
+        28.4,
+        5
+      ]
     },
     {
       "id": "void",
@@ -200,7 +360,10 @@
       "price": 16000,
       "color": "#9b3dff",
       "style": "throne",
-      "shop": [24.6, 10]
+      "shop": [
+        24.6,
+        10
+      ]
     },
     {
       "id": "diamond",
@@ -209,25 +372,28 @@
       "price": 30000,
       "color": "#8ff4ff",
       "style": "throne",
-      "shop": [28.4, 10]
+      "shop": [
+        28.4,
+        10
+      ]
     }
   ],
   "emotes": [
     {
       "id": "higher",
-      "label": "HIGHER",
-      "icon": "⬆️",
+      "label": "THINKING",
+      "icon": "🤔",
       "price": 0
     },
     {
       "id": "lower",
-      "label": "LOWER",
-      "icon": "⬇️",
+      "label": "NOPE",
+      "icon": "😂",
       "price": 0
     },
     {
       "id": "close",
-      "label": "CLOSE",
+      "label": "SO CLOSE",
       "icon": "😬",
       "price": 0
     },
@@ -299,8 +465,8 @@
     },
     {
       "id": "waytooclose",
-      "label": "WAY TOO CLOSE",
-      "icon": "😬",
+      "label": "I KNOW IT",
+      "icon": "💡",
       "price": 3500
     },
     {
@@ -351,6 +517,11 @@
     "emotes": [
       "gg",
       "lol"
+    ],
+    "apps": [
+      "openai",
+      "claude",
+      "googlegemini"
     ]
   },
   "quests": [
@@ -384,7 +555,7 @@
     },
     {
       "id": "quickwin",
-      "label": "Win Within 3 Guesses",
+      "label": "Win Revealing 8 Tiles Or Less",
       "event": "quickwin",
       "goal": 1,
       "reward": 700
@@ -395,6 +566,20 @@
       "event": "streak3",
       "goal": 1,
       "reward": 900
+    },
+    {
+      "id": "flip25",
+      "label": "Flip 25 Tiles",
+      "event": "flip",
+      "goal": 25,
+      "reward": 300
+    },
+    {
+      "id": "buyapp",
+      "label": "Unlock A New App",
+      "event": "buyapp",
+      "goal": 1,
+      "reward": 250
     },
     {
       "id": "emote5",
@@ -490,19 +675,19 @@
   "titles": [
     {
       "id": "t_rookie",
-      "name": "Rookie Guesser",
+      "name": "Rookie Swiper",
       "color": "#c8d0dc",
       "level": 5
     },
     {
       "id": "t_ninja",
-      "name": "Number Ninja",
+      "name": "App Ninja",
       "color": "#5cff5c",
       "level": 10
     },
     {
       "id": "t_reader",
-      "name": "Mind Reader",
+      "name": "Logo Reader",
       "color": "#4fd8ff",
       "level": 20
     },
@@ -534,7 +719,7 @@
     },
     {
       "id": "t_pro",
-      "name": "Higher Lower Pro",
+      "name": "Logo Pro",
       "color": "#2f9bff",
       "price": 4000,
       "rarity": "rare"

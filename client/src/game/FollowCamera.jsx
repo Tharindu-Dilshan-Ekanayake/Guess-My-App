@@ -41,6 +41,25 @@ const TABLE_LOOK_HEIGHT = 1.15
 /** Looks higher while the winner dances up on the table. */
 const TABLE_LOOK_HEIGHT_WIN = 1.9
 
+/**
+ * Board view (choosing and guessing): above the table, looking almost straight down
+ * at both boards, the seats at the top of the screen. Distance is fitted so this
+ * much of the table stays in frame on any aspect ratio.
+ */
+const BOARD_VIEW_WIDTH = 2.95
+const BOARD_VIEW_DEPTH = 2.55
+/**
+ * Portrait phones: both boards side by side would make tiles too small to tap, so
+ * the view frames only your own board (the opponent's progress is in the top bar).
+ */
+const PORTRAIT_ASPECT = 0.9
+const BOARD_VIEW_WIDTH_PORTRAIT = DATA.board.size + 0.3
+/** Tilt from straight down, in radians. */
+const BOARD_VIEW_TILT = 0.36
+/** Aim a little in front of the boards so they sit above the turn buttons. */
+const BOARD_VIEW_AIM_Z = -0.3
+const DEG = Math.PI / 180
+
 const _desired = new Vector3()
 const _target = new Vector3()
 
@@ -49,7 +68,8 @@ const _target = new Vector3()
  * Right-drag (mouse) or one-finger drag (touch) orbits; the wheel zooms.
  *
  * While the player is seated at a table it swings round to face both seats, the
- * duel view, and orbiting is disabled.
+ * duel view (countdown, result), or looks down on the tile boards (choosing,
+ * guessing). Orbiting is disabled while seated.
  */
 export function FollowCamera() {
   const camera = useThree((s) => s.camera)
@@ -74,7 +94,8 @@ export function FollowCamera() {
       // the canvas is always meant for the camera). Touch: any finger that lands on
       // the canvas (the joystick and buttons are DOM, above it).
       if (e.pointerType === 'mouse' && e.button !== 0 && e.button !== 2) return
-      if (dragId !== null) return
+      // Seated, the camera is fixed and taps belong to the tile boards.
+      if (dragId !== null || useGame.getState().match) return
       dragId = e.pointerId
       lastX = e.clientX
       lastY = e.clientY
@@ -137,6 +158,28 @@ export function FollowCamera() {
   useFrame((_state, delta) => {
     const match = useGame.getState().match
     const table = match && DATA.tables.find((t) => t.id === match.table)
+
+    const boardView = match && (match.phase === 'choosing' || match.phase === 'guessing')
+    if (table && boardView) {
+      const halfV = Math.tan((camera.fov * DEG) / 2)
+      const halfH = halfV * camera.aspect
+      const portrait = camera.aspect < PORTRAIT_ASPECT
+      const width = portrait ? BOARD_VIEW_WIDTH_PORTRAIT : BOARD_VIEW_WIDTH
+      const d = Math.max(BOARD_VIEW_DEPTH / 2 / halfV, width / 2 / halfH)
+      const x = portrait ? table.x + (match.seat === 0 ? -1 : 1) * DATA.board.seatOffset : table.x
+      _target.set(x, TABLE.height, table.z + BOARD_VIEW_AIM_Z)
+      _desired.set(
+        x,
+        TABLE.height + d * Math.cos(BOARD_VIEW_TILT),
+        _target.z - d * Math.sin(BOARD_VIEW_TILT),
+      )
+      const k = 1 - Math.pow(0.001, delta * (TABLE_SMOOTHING / 10) * 3)
+      camera.position.lerp(_desired, k)
+      lookAt.current.lerp(_target, k)
+      camera.lookAt(lookAt.current)
+      orbit.current.yaw = 0
+      return
+    }
 
     if (table) {
       // A winner dancing up on the table is tall: step back so they fit in frame.

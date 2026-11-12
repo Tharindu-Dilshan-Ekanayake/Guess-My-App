@@ -30,16 +30,20 @@ export const useGame = create((set, get) => ({
   profile: null,
   lb: { streaks: [], wins: [], levels: [], playtime: [] },
   toasts: [],
-  /** null | 'shop' | 'items' | 'rewards' | 'quests' | 'help' | 'settings' */
+  /** null | 'shop' | 'items' | 'rewards' | 'quests' | 'help' | 'settings' | 'apps' */
   modal: null,
   shopTab: 'chairs',
-  /** Duel outcome banner for this player: { win, reward, theirNumber, until }. */
+  /** Duel outcome banner for this player: { win, reward, theirApp, reason, until }. */
   result: null,
   /**
-   * The guess being revealed at this table: { mine, n, answer, until }. `answer` is
-   * null during the suspense, then 'higher' | 'lower' | 'correct'.
+   * The guess being revealed at this table: { mine, id, correct, until }. `correct`
+   * is null during the suspense, then true / false.
    */
   reveal: null,
+  /** The app the App Crate just gave: { id, at }, or null. */
+  unboxed: null,
+  /** App Store filter: 'all' | 'owned' | 'locked'. */
+  appsTab: 'all',
   /** Level-up celebration: { level, reward, title, until }. */
   levelUp: null,
   /** The quick-phrase list under the duel: folded away until the player opens it. */
