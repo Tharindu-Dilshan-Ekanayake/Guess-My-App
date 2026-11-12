@@ -1,23 +1,28 @@
+const { appById, appsUpToTier, IDS, lookalikes } = require('./apps')
 const DATA = require('./data')
 const { PlayerState } = require('./schema')
 
-const MIN = DATA.numberMin
-const MAX = DATA.numberMax
-
 const rand = (lo, hi) => lo + Math.random() * (hi - lo)
 const randomInt = (lo, hi) => Math.floor(rand(lo, hi + 1))
-const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, n))
+const pickRandom = (list) => list[Math.floor(Math.random() * list.length)]
 
 /** Chairs a bot may sit on: the cheaper ones, so it looks like an ordinary newcomer. */
 const BOT_CHAIRS = DATA.chairs.filter((c) => c.price <= 1200).map((c) => c.id)
 /** How long a bot "thinks" before acting, in ms: a range, so it doesn't feel scripted. */
-const THINK_MS = { pick: [1200, 3500], guess: [1500, 4200], leave: [500, 900] }
+const THINK_MS = { pick: [1500, 4000], flip: [900, 2200], decide: [900, 2400], leave: [500, 900] }
+/** How much harder each tier above 1 is to recognise (share of the board that must be open). */
+const TIER_PENALTY = 0.05
 
 /**
  * A practice opponent: stands in for a second player so nobody waits at a table for
- * ever. It plays through the same Table methods a real player does (pick, guess), so
- * the duel rules are enforced identically, and it learns the state of the duel from
- * the same private `match` messages a client would receive.
+ * ever. It plays through the same Table methods a real player does (pick, flip,
+ * guess, skip), so the duel rules are enforced identically, and it follows the duel
+ * through the same private `match` messages a client would receive.
+ *
+ * It "recognises" the player's app once enough of the board is open: a share that
+ * depends on the table's mode, how obscure the app is (its tier) and a per-duel
+ * wobble. Before that it sometimes blurts out a lookalike (an app of a similar
+ * colour), as people do.
  *
  * Bots live only for one duel: they appear when someone has waited alone, and are
  * removed when the duel is over or their opponent leaves. They never touch profiles,
@@ -38,6 +43,8 @@ class Bot {
     this.seat = null
     this.timer = null
     this.key = ''
+    /** Per-duel sharpness: some bots are quicker than others. */
+    this.wobble = rand(-0.06, 0.06)
 
     // The bits of a profile that Table and GameRoom read.
     this.profile = {
@@ -95,29 +102,78 @@ class Bot {
     }
 
     // The table syncs many times per phase; act once per distinct situation.
-    const key = `${m.phase}:${m.guesses}:${m.myTurn ? 1 : 0}:${m.myNumber == null ? 0 : 1}`
+    const key = `${m.phase}:${m.turnNo}:${m.myTurn ? 1 : 0}:${m.flipped ? 1 : 0}:${m.myApp ? 1 : 0}`
     if (key === this.key) return
     this.key = key
     this.clear()
 
     const table = this.seat?.table
     if (!table) return
-    if (m.phase === 'choosing' && m.myNumber == null) {
-      this.later(THINK_MS.pick, () => table.pick(this, randomInt(MIN, MAX), Date.now()))
+    if (m.phase === 'choosing' && !m.myApp) {
+      this.later(THINK_MS.pick, () => table.pick(this, this.chooseApp(table), Date.now()))
+    } else if (m.phase === 'guessing' && m.myTurn && !m.flipped) {
+      this.later(THINK_MS.flip, () => table.flip(this, this.chooseTile(table), Date.now()))
     } else if (m.phase === 'guessing' && m.myTurn) {
-      this.later(THINK_MS.guess, () => table.guess(this, this.chooseGuess(m.range), Date.now()))
+      this.later(THINK_MS.decide, () => this.decide(table))
     }
   }
 
+  /** Its secret app: anything up to the table's tier (hard tables hide rarer apps). */
+  chooseApp(table) {
+    return pickRandom(appsUpToTier(table.cfg.botTier)).id
+  }
+
   /**
-   * Splits the remaining range near the middle with a little human-looking wobble, so
-   * it plays well (about as well as a careful player) without being a perfect machine.
+   * Which tile to flip: like a person, near the middle of the board first (logos
+   * live there), then next to tiles already open, with some randomness.
    */
-  chooseGuess([lo, hi]) {
-    const width = hi - lo + 1
-    if (width <= 2) return Math.random() < 0.5 ? lo : hi
-    const wobble = (Math.random() - 0.5) * width * 0.35
-    return clamp(Math.round((lo + hi) / 2 + wobble), lo, hi)
+  chooseTile(table) {
+    const i = this.seat.index
+    const n = table.cfg.grid
+    const open = table.revealed[i]
+    const mid = (n - 1) / 2
+    let best = -1
+    let bestScore = -Infinity
+    for (let k = 0; k < table.tiles; k += 1) {
+      if (open.has(k)) continue
+      const r = Math.floor(k / n)
+      const c = k % n
+      const centre = -Math.hypot(r - mid, c - mid) / n
+      const near = [k - n, k + n, c > 0 ? k - 1 : -1, c < n - 1 ? k + 1 : -1].filter((x) => open.has(x)).length
+      const score = centre * 2 + near * 0.25 + Math.random() * 0.9
+      if (score > bestScore) {
+        bestScore = score
+        best = k
+      }
+    }
+    return best
+  }
+
+  /** Guess (rightly once it "sees" the logo, sometimes wrongly before) or skip. */
+  decide(table) {
+    const i = this.seat.index
+    const target = table.secrets[1 - i]
+    const app = appById(target)
+    if (!app) return table.skip(this, Date.now())
+
+    const shown = table.revealed[i].size / table.tiles
+    const need = table.cfg.bot.threshold + (app.tier - 1) * TIER_PENALTY + this.wobble
+    const ruledOut = new Set(table.wrong[i])
+
+    if (shown >= need) {
+      table.guess(this, target, Date.now())
+      return
+    }
+    if (Math.random() < table.cfg.bot.wild + shown * 0.25) {
+      // A lookalike when there's one left to try, otherwise any app.
+      const options = lookalikes(target, 8).filter((id) => !ruledOut.has(id))
+      const pool = options.length ? options : IDS.filter((id) => id !== target && !ruledOut.has(id))
+      if (pool.length) {
+        table.guess(this, pickRandom(pool), Date.now())
+        return
+      }
+    }
+    table.skip(this, Date.now())
   }
 
   leave() {

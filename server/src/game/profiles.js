@@ -1,4 +1,5 @@
 const { boxity } = require('../bloxity/config')
+const { isApp, STARTER_APPS } = require('./apps')
 const DATA = require('./data')
 const { createStore } = require('./profileStore')
 
@@ -45,6 +46,8 @@ function createProfile(id, name) {
     ownedChairs: ['basic'],
     equippedChair: 'basic',
     ownedEmotes: [...DEFAULT_EMOTES],
+    /** Apps this player may pick as their secret app (the App Store sells the rest). */
+    ownedApps: [...STARTER_APPS],
     /** Head auras bought in the shop, and the one worn ('' = none). */
     ownedHalos: [],
     equippedHalo: '',
@@ -73,6 +76,8 @@ function normalise(raw) {
   const p = { ...createProfile(rest.id || _id, rest.name || 'Player'), ...rest }
   for (const id of DEFAULT_EMOTES) if (!p.ownedEmotes.includes(id)) p.ownedEmotes.push(id)
   if (!p.ownedChairs.includes('basic')) p.ownedChairs.unshift('basic')
+  // Apps removed from the catalogue drop out; starter apps are always owned.
+  p.ownedApps = [...new Set([...STARTER_APPS, ...(p.ownedApps || []).filter(isApp)])]
   for (const t of DATA.titles) {
     if (t.level && t.level <= p.level && !p.ownedTitles.includes(t.id)) p.ownedTitles.push(t.id)
   }
@@ -264,6 +269,7 @@ function view(p, { now = Date.now(), giftReadyAt = now } = {}) {
     ownedChairs: p.ownedChairs,
     equippedChair: p.equippedChair,
     ownedEmotes: p.ownedEmotes,
+    ownedApps: p.ownedApps,
     ownedHalos: p.ownedHalos,
     equippedHalo: p.equippedHalo,
     level: p.level,

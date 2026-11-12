@@ -23,8 +23,22 @@ const REPLACED = 4100
 const AFK_KICK = 4200
 const AFK_TICK_MS = 5000
 
+/**
+ * Close code for "hop to another server": this pod is draining for a deploy. The
+ * client treats it like any unexpected close and rejoins through the matchmaker,
+ * which places it on a fresh pod.
+ */
+const HOP = 4300
+/** How long a hopping player sees the "moving you" toast before the hop. */
+const HOP_DELAY_MS = 1500
+const DRAIN_POLL_MS = 2000
+
 /** profile id -> live session, across every room in this process. */
 const liveByProfile = new Map()
+/** Every room open in this process, for draining on shutdown. */
+const liveRooms = new Set()
+/** Set once this pod is shutting down: it takes no new players (they go to a fresh pod). */
+let podDraining = false
 
 /**
  * One game server: up to 20 players sharing the island and its fifteen tables.
@@ -39,6 +53,9 @@ class GameRoom extends Room {
   maxMessagesPerSecond = 40
 
   onCreate() {
+    liveRooms.add(this)
+    /** True once a deploy asked this pod to stop: no new duels start here. */
+    this.draining = false
     this.state = new GameState()
     /** session id -> Session, including players mid-reconnect. */
     this.sessions = new Map()
@@ -75,6 +92,9 @@ class GameRoom extends Room {
    * profile. The result becomes `client.auth`.
    */
   async onAuth(_client, options) {
+    // A draining pod turns joins away; the client retries through the matchmaker,
+    // which places it on the new pod.
+    if (podDraining) throw new ServerError(503, 'Server restarting, try again')
     const identity = await resolveIdentity(options, cleanName)
     if (!identity) throw new ServerError(400, 'Missing player identity')
     const profile = await profiles.loadProfile(identity.profileId, identity.name, {
@@ -133,6 +153,61 @@ class GameRoom extends Room {
     this.sessions.delete(client.sessionId)
     this.state.players.delete(client.sessionId)
     if (liveByProfile.get(session.profile.id) === session) liveByProfile.delete(session.profile.id)
+  }
+
+  onDispose() {
+    liveRooms.delete(this)
+  }
+
+  /** In a duel that has started (not just waiting alone at a table). */
+  inDuel(session) {
+    const phase = session.seat?.table.phase
+    return Boolean(phase && phase !== 'waiting')
+  }
+
+  /** Any duel still being played here. */
+  busy() {
+    for (const session of this.sessions.values()) if (this.inDuel(session)) return true
+    return false
+  }
+
+  /** Stops new duels here and moves everyone who isn't mid-duel to a fresh pod. */
+  startDrain() {
+    if (this.draining) return
+    this.draining = true
+    void this.lock()
+    this.hopIdle()
+  }
+
+  /** Sends every player not in a duel to another pod (they rejoin through the matchmaker). */
+  hopIdle() {
+    for (const session of this.sessions.values()) {
+      if (session.kicked || session.reconnection || this.inDuel(session)) continue
+      session.kicked = true
+      session.toast('Server update! Moving you to a fresh server… 🚀')
+      this.clock.setTimeout(() => session.client.leave(HOP), HOP_DELAY_MS)
+    }
+  }
+
+  /**
+   * Zero-downtime deploys: on SIGTERM every room stops starting duels and sends its
+   * idle players to the new pod at once; players mid-duel finish their match, then
+   * hop too. Resolves when no duel is left, or after `maxMs` (Bloxity waits up to
+   * 10 minutes before killing the pod).
+   */
+  static async drainAll(maxMs) {
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+    podDraining = true
+    for (const room of liveRooms) room.startDrain()
+    const until = Date.now() + maxMs
+    while (Date.now() < until) {
+      for (const room of liveRooms) room.hopIdle()
+      if (![...liveRooms].some((room) => room.busy())) break
+      await sleep(DRAIN_POLL_MS)
+    }
+    for (const room of liveRooms) room.hopIdle()
+    // Let the last hops' toasts land and their sockets close.
+    await sleep(HOP_DELAY_MS + 500)
   }
 
   onUncaughtException(error, methodName) {
@@ -255,17 +330,24 @@ class GameRoom extends Room {
     return this.tables.find((t) => t.id === id) || null
   }
 
+  /** A quest event for a real player (bots have no quests). */
+  questEvent(session, event, amount = 1, now = Date.now()) {
+    if (!session || session.isBot) return
+    profiles.addQuestEvent(session.profile, event, amount, now)
+  }
+
   /**
-   * Awards a win and returns the cash granted. A win over a practice bot (`vsBot`) pays
-   * a share of the usual cash and XP, and counts for no wins, streaks, win quests or
-   * leaderboards, so bots can't be farmed for rank.
+   * Awards a win and returns the cash granted: the table's prize (`reward`), and a
+   * quick-win quest when few tiles were opened (`revealed`). A win over a practice bot
+   * (`vsBot`) pays a share of the usual cash and XP, and counts for no wins, streaks,
+   * win quests or leaderboards, so bots can't be farmed for rank.
    */
-  recordWin(session, guesses, now, vsBot = false) {
+  recordWin(session, { reward, revealed }, now, vsBot = false) {
     if (session.isBot) return 0
     const p = session.profile
     const has = (pass) => p.passes.includes(pass)
     const scale = vsBot ? DATA.bots.rewardScale : 1
-    const cash = Math.round(DATA.winReward * (profiles.isWeekend(now) ? 2 : 1) * (has('cash2x') ? 2 : 1) * scale)
+    const cash = Math.round(reward * (profiles.isWeekend(now) ? 2 : 1) * (has('cash2x') ? 2 : 1) * scale)
     p.cash += cash
     profiles.addQuestEvent(p, 'play', 1, now)
 
@@ -275,7 +357,7 @@ class GameRoom extends Room {
       p.streak += has('streak2x') ? 2 : 1
       p.bestStreak = Math.max(p.bestStreak, p.streak)
       profiles.addQuestEvent(p, 'win', 1, now)
-      if (guesses <= 3) profiles.addQuestEvent(p, 'quickwin', 1, now)
+      if (revealed <= 8) profiles.addQuestEvent(p, 'quickwin', 1, now)
       if (p.streak >= 3) profiles.addQuestEvent(p, 'streak3', 1, now)
 
       // Win-streak milestones pay a bonus, announced to the whole server.

@@ -1,11 +1,24 @@
+const { appById, isApp, IDS, STARTER_APPS } = require('./apps')
 const DATA = require('./data')
 
-const MIN = DATA.numberMin
-const MAX = DATA.numberMax
 const T = DATA.timing
 
-const randomInt = (lo, hi) => lo + Math.floor(Math.random() * (hi - lo + 1))
-const isValidNumber = (n) => Number.isInteger(n) && n >= MIN && n <= MAX
+const pickRandom = (list) => list[Math.floor(Math.random() * list.length)]
+
+/**
+ * A set of tile indices as a hex string, 4 tiles per digit ('' when nothing is
+ * open). 100 tiles fit in 25 characters, so the public table state stays tiny.
+ */
+function encodeTiles(set, count) {
+  if (set.size === 0) return ''
+  let out = ''
+  for (let k = 0; k < count; k += 4) {
+    let v = 0
+    for (let b = 0; b < 4; b += 1) if (set.has(k + b)) v |= 1 << b
+    out += v.toString(16)
+  }
+  return out
+}
 
 /**
  * One two-seat table and the duel played at it.
@@ -13,17 +26,17 @@ const isValidNumber = (n) => Number.isInteger(n) && n >= MIN && n <= MAX
  * Phases:
  *   waiting   - zero or one player seated
  *   countdown - both seats filled, "Starting in 3..."
- *   choosing  - each player secretly picks 1-100
- *   guessing  - players take turns guessing the other's number; the server answers
- *               "Higher" / "Lower" on the opponent's behalf
+ *   choosing  - each player secretly picks one of the apps they own
+ *   guessing  - turns: flip one tile of the board hiding the opponent's app, then
+ *               guess the app or skip.
  *   ended     - result on screen; both players are stood up when it runs out
  *
- * The server holds both secrets. A client only ever learns its own number, the range
- * its guesses have narrowed the opponent's down to.
+ * Each seat has its own board in front of it: an N x N grid of tiles covering the
+ * OPPONENT's app. `revealed[i]` is the set of tiles seat i has opened.
  */
 class Table {
   /**
-   * @param {{ id: number, x: number, z: number }} def
+   * @param {{ id: number, x: number, z: number, mode?: string }} def
    * @param {import('./GameRoom')} room
    * @param {object} state this table's synced TableState, for every client to see
    */
@@ -31,6 +44,9 @@ class Table {
     this.id = def.id
     this.x = def.x
     this.z = def.z
+    this.mode = DATA.modes[def.mode] ? def.mode : 'normal'
+    this.cfg = DATA.modes[this.mode]
+    this.tiles = this.cfg.grid * this.cfg.grid
     this.room = room
     this.state = state
     /** @type {Array<import('./Session')|null>} */
@@ -42,20 +58,22 @@ class Table {
   reset() {
     this.phase = 'waiting'
     this.endsAt = 0
+    /** Each seat's secret app id. */
     this.secrets = [null, null]
-    /** ranges[i] = what seat i has narrowed seat (1-i)'s number down to. */
-    this.ranges = [
-      [MIN, MAX],
-      [MIN, MAX],
-    ]
+    /** revealed[i] = tiles seat i has opened on the board hiding seat (1-i)'s app. */
+    this.revealed = [new Set(), new Set()]
+    /** Wrong guesses each seat has made (app ids). */
+    this.wrong = [[], []]
     this.guesses = [0, 0]
-    /** history[i] = seat i's guesses so far: [{ n, answer: 'higher'|'lower'|'correct' }]. */
-    this.history = [[], []]
     this.turn = 0
+    /** Counts turns, so a bot can tell one turn from the next. */
+    this.turnNo = 0
+    /** The free flip of the current turn has been used. */
+    this.flipped = false
     /** Seat index of the winner once the duel has ended, else -1. */
     this.winner = -1
     this.timeouts = [0, 0]
-    /** True between a guess and its answer, so a second guess can't sneak in. */
+    /** True between a guess and its answer, so a second action can't sneak in. */
     this.pending = false
     // Invalidates any setTimeout scheduled for the previous match.
     this.token += 1
@@ -66,6 +84,7 @@ class Table {
   }
 
   sit(session, now) {
+    if (this.room.draining) return 'Server update in progress: hopping you to a fresh server…'
     if (this.phase !== 'waiting') return 'This table is already playing'
     const free = this.seats.indexOf(null)
     if (free < 0) return 'This table is full'
@@ -110,65 +129,120 @@ class Table {
     session.send('match', { match: null })
   }
 
-  pick(session, n, now) {
+  /** Apps a seat may choose as its secret: everything a bot likes, a player's owned apps. */
+  choosable(session) {
+    if (!session) return STARTER_APPS
+    if (session.isBot) return IDS
+    const owned = session.profile.ownedApps
+    return owned?.length ? owned : STARTER_APPS
+  }
+
+  pick(session, id, now) {
     const i = this.seatOf(session)
     if (i < 0 || this.phase !== 'choosing' || this.secrets[i] !== null) return
-    if (!isValidNumber(n)) return
+    if (!isApp(id) || !this.choosable(session).includes(id)) return
 
-    this.secrets[i] = n
+    this.secrets[i] = id
     this.room.bubble(session, 'Ready ✅')
     if (this.secrets[1 - i] !== null) this.startGuessing(now)
     else this.sync(now)
   }
 
-  guess(session, n, now) {
+  /** Seat index of `session` if it may act right now (its turn, nothing pending), else -1. */
+  actor(session) {
     const i = this.seatOf(session)
-    if (i < 0 || this.phase !== 'guessing' || this.turn !== i || this.pending) return
-    const [lo, hi] = this.ranges[i]
-    if (!isValidNumber(n) || n < lo || n > hi) return
+    if (i < 0 || this.phase !== 'guessing' || this.turn !== i || this.pending) return -1
+    return i
+  }
+
+  hiddenTiles(i) {
+    const out = []
+    for (let k = 0; k < this.tiles; k += 1) if (!this.revealed[i].has(k)) out.push(k)
+    return out
+  }
+
+  /** Opens tiles on seat i's board; returns how many were newly opened. */
+  open(i, tiles) {
+    let opened = 0
+    for (const k of tiles) {
+      if (k < 0 || k >= this.tiles || this.revealed[i].has(k)) continue
+      this.revealed[i].add(k)
+      opened += 1
+    }
+    if (opened) this.room.questEvent(this.seats[i], 'flip', opened)
+    return opened
+  }
+
+  /** The free flip of a turn: one tile the player chose. */
+  flip(session, index, now) {
+    const i = this.actor(session)
+    if (i < 0 || this.flipped) return
+    if (!Number.isInteger(index) || index < 0 || index >= this.tiles || this.revealed[i].has(index)) return
+    this.flipped = true
+    this.timeouts[i] = 0
+    this.open(i, [index])
+    this.sync(now)
+  }
+
+  /** Flips a random hidden tile for a player who didn't (timeout, or skipping first). */
+  autoFlip(i) {
+    if (this.flipped) return
+    const hidden = this.hiddenTiles(i)
+    if (hidden.length) this.open(i, [pickRandom(hidden)])
+    this.flipped = true
+  }
+
+  guess(session, id, now) {
+    const i = this.actor(session)
+    if (i < 0 || !isApp(id) || this.wrong[i].includes(id)) return
 
     this.guesses[i] += 1
     this.timeouts[i] = 0
     this.pending = true
-    this.room.bubble(session, `Is your number ${n}? 🤔`)
+    this.room.bubble(session, `Is it ${appById(id).name}? 🤔`)
     // Both players see the guess land, then (after the suspense) the answer.
-    this.tell({ t: 'guessed', by: i, n })
+    this.tell({ t: 'guessed', by: i, id })
     this.sync(now)
 
     const token = this.token
     // Room clock: cleared automatically if the room is disposed meanwhile.
     this.room.clock.setTimeout(() => {
       if (this.token !== token || this.phase !== 'guessing') return
-      this.resolveGuess(i, n, Date.now())
+      this.resolveGuess(i, id, Date.now())
     }, T.guessReveal * 1000)
   }
 
-  resolveGuess(i, n, now) {
+  resolveGuess(i, id, now) {
     const o = 1 - i
-    const secret = this.secrets[o]
-    if (n === secret) {
-      this.history[i].push({ n, answer: 'correct' })
-      this.tell({ t: 'answer', by: i, n, answer: 'correct' })
+    if (id === this.secrets[o]) {
+      this.tell({ t: 'answer', by: i, id, correct: true })
+      this.room.bubble(this.seats[o], 'Yes 😭')
       this.finish(i, o, 'guessed', now)
       return
     }
-    const answer = n < secret ? 'higher' : 'lower'
-    this.history[i].push({ n, answer })
-    this.tell({ t: 'answer', by: i, n, answer })
-    if (answer === 'higher') {
-      this.ranges[i][0] = n + 1
-      this.room.bubble(this.seats[o], 'Higher 👆')
-    } else {
-      this.ranges[i][1] = n - 1
-      this.room.bubble(this.seats[o], 'Lower 👇')
-    }
-    this.turn = o
+    this.wrong[i].push(id)
+    this.tell({ t: 'answer', by: i, id, correct: false })
+    this.room.bubble(this.seats[o], 'Nope 😂')
+    this.passTurn(now)
+  }
+
+  /** Ends your turn without guessing (your free flip happens first if you skipped it). */
+  skip(session, now) {
+    const i = this.actor(session)
+    if (i < 0) return
+    this.timeouts[i] = 0
+    this.autoFlip(i)
+    this.passTurn(now)
+  }
+
+  passTurn(now) {
+    this.turn = 1 - this.turn
     this.beginTurn(now)
   }
 
   /**
    * A duel event for both seated players, from each one's point of view: `mine`
-   * is true for the player who made the guess.
+   * is true for the player who acted.
    */
   tell({ t, by, ...rest }) {
     this.seats.forEach((s, i) => s?.send('duel', { t, mine: i === by, ...rest }))
@@ -184,11 +258,15 @@ class Table {
   startGuessing(now) {
     this.phase = 'guessing'
     this.turn = Math.random() < 0.5 ? 0 : 1
+    for (const s of this.seats) this.room.bubble(s, '')
     this.beginTurn(now)
   }
 
   beginTurn(now) {
     this.pending = false
+    this.turnNo += 1
+    // A board with nothing left to flip goes straight to guessing.
+    this.flipped = this.revealed[this.turn].size >= this.tiles
     this.endsAt = now + T.turn * 1000
     this.sync(now)
   }
@@ -205,17 +283,19 @@ class Table {
 
     // A practice match (against a bot) pays less and doesn't count for the boards.
     const vsBot = Boolean(winner?.isBot || loser?.isBot)
-    if (winner) reward = this.room.recordWin(winner, this.guesses[w], now, vsBot)
+    if (winner) {
+      reward = this.room.recordWin(winner, { reward: this.cfg.reward, revealed: this.revealed[w].size }, now, vsBot)
+    }
     let consolation = 0
     if (loser) consolation = this.room.recordLoss(loser, now, reason, vsBot)
-    if (loser) this.room.bubble(loser, 'NOOO! 💀')
+    if (loser && reason !== 'guessed') this.room.bubble(loser, 'NOOO! 💀')
     if (winner) this.room.bubble(winner, reason === 'forfeit' ? 'GG 👍' : 'Got it! 😎')
 
     this.room.broadcast('result', {
       table: this.id,
       winner: winner?.id ?? null,
       loser: loser?.id ?? null,
-      numbers: [...this.secrets],
+      apps: [...this.secrets],
       reward,
       consolation,
       reason,
@@ -244,8 +324,8 @@ class Table {
       // Too slow to choose: the server chooses for you.
       this.secrets.forEach((s, i) => {
         if (s === null) {
-          this.secrets[i] = randomInt(MIN, MAX)
-          this.seats[i]?.toast(`Out of time! Your number is ${this.secrets[i]}`)
+          this.secrets[i] = pickRandom(this.choosable(this.seats[i]))
+          this.seats[i]?.toast(`Out of time! Your app is ${appById(this.secrets[i]).name}`)
         }
       })
       this.startGuessing(now)
@@ -255,9 +335,10 @@ class Table {
       if (this.timeouts[slow] >= 2) {
         this.finish(1 - slow, slow, 'afk', now)
       } else {
+        // The board still moves on: their free flip lands on a random tile.
+        this.autoFlip(slow)
         this.seats[slow]?.toast('Too slow! Turn skipped')
-        this.turn = 1 - slow
-        this.beginTurn(now)
+        this.passTurn(now)
       }
     } else if (this.phase === 'ended') {
       this.unseat(0)
@@ -269,19 +350,29 @@ class Table {
 
   privateState(i, now) {
     const o = 1 - i
+    const playing = this.phase === 'guessing' || this.phase === 'ended'
+    const myTurn = this.phase === 'guessing' && this.turn === i && !this.pending
     return {
       table: this.id,
       seat: i,
+      mode: this.mode,
+      grid: this.cfg.grid,
       phase: this.phase,
       endsInMs: Math.max(0, this.endsAt - now),
-      myNumber: this.secrets[i],
-      range: [...this.ranges[i]],
-      myTurn: this.phase === 'guessing' && this.turn === i && !this.pending,
+      myApp: this.secrets[i],
+      // Needed to draw the tiles this player has opened. Only once both have chosen.
+      theirApp: playing ? this.secrets[o] : null,
+      myTurn,
       theirTurn: this.phase === 'guessing' && this.turn === o,
+      turnNo: this.turnNo,
+      flipped: myTurn && this.flipped,
       pending: this.pending,
       guesses: this.guesses[i],
-      myHistory: this.history[i],
-      theirHistory: this.history[o],
+      revealed: this.revealed[i].size,
+      theirRevealed: this.revealed[o].size,
+      tiles: this.tiles,
+      wrong: this.wrong[i],
+      theirWrong: this.wrong[o],
       won: this.phase === 'ended' && this.winner === i,
       opponent: this.seats[o]?.id ?? null,
       opponentReady: this.secrets[o] !== null,
@@ -302,6 +393,9 @@ class Table {
     st.turn = this.phase === 'guessing' ? (this.seats[this.turn]?.id ?? '') : ''
     st.winner = this.phase === 'ended' ? (this.seats[this.winner]?.id ?? '') : ''
     st.endsAt = this.phase === 'waiting' ? 0 : this.endsAt
+    // Which tiles are open (not what's under them): everyone sees the boards move.
+    st.rev0 = encodeTiles(this.revealed[0], this.tiles)
+    st.rev1 = encodeTiles(this.revealed[1], this.tiles)
     this.seats.forEach((s, i) => s?.send('match', { match: this.privateState(i, now) }))
   }
 }

@@ -39,7 +39,7 @@ const HOSTING_ID = import.meta.env.VITE_BLOXITY_HOSTING_ID || ''
 const POS_INTERVAL_MS = 100
 const HEARTBEAT_MS = 1000
 const LOSS_HIDE_MS = 2200
-/** How long the Higher / Lower answer stays on screen. */
+/** How long a guess's "YES / NOPE" answer stays on screen. */
 const REVEAL_HOLD_MS = 1700
 /** A cold start can take ~45 s; stop retrying after this long without a room. */
 const GIVE_UP_MS = 60000
@@ -464,6 +464,8 @@ function applyTable(id, t) {
     turn: t.turn || null,
     winner: t.winner || null,
     endsAt: t.endsAt ? t.endsAt - clockOffset : 0,
+    /** Tiles opened on each seat's board (hex bitmasks), for the 3D boards. */
+    rev: [t.rev0 || '', t.rev1 || ''],
   }
   indexSeats(table)
   useGame.setState((s) => ({ tables: { ...s.tables, [id]: table } }))
@@ -532,19 +534,24 @@ const handlers = {
     useGame.setState({ profile: withProfileDeadlines(msg.profile) })
   },
 
-  /** A guess landing, then its Higher / Lower answer, for the reveal card. */
+  /** A guess landing ("Is it TikTok?"), then its answer, for the reveal card. */
   duel(msg) {
     const now = Date.now()
     if (msg.t === 'guessed') {
       sfx.drum()
-      useGame.setState({ reveal: { mine: msg.mine, n: msg.n, answer: null, until: now + 5000 } })
+      useGame.setState({ reveal: { mine: msg.mine, id: msg.id, correct: null, until: now + 5000 } })
     } else if (msg.t === 'answer') {
-      if (msg.answer === 'higher') sfx.higher()
-      else if (msg.answer === 'lower') sfx.lower()
+      if (!msg.correct) sfx.lower()
       // A correct guess hands over to the result banner quickly.
-      const hold = msg.answer === 'correct' ? 900 : REVEAL_HOLD_MS
-      useGame.setState({ reveal: { mine: msg.mine, n: msg.n, answer: msg.answer, until: now + hold } })
+      const hold = msg.correct ? 900 : REVEAL_HOLD_MS
+      useGame.setState({ reveal: { mine: msg.mine, id: msg.id, correct: msg.correct, until: now + hold } })
     }
+  },
+
+  /** The App Crate's prize, for the unboxing card in the App Store. */
+  unboxed(msg) {
+    sfx.reward()
+    useGame.setState({ unboxed: { id: msg.id, at: Date.now() } })
   },
 
   bubble(msg) {
@@ -602,7 +609,7 @@ const handlers = {
         result: {
           win,
           reward: win ? msg.reward : msg.consolation || 0,
-          theirNumber: msg.numbers[1 - mySeat],
+          theirApp: msg.apps[1 - mySeat],
           reason: msg.reason,
           until: now + 3800,
         },

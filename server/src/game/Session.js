@@ -1,3 +1,4 @@
+const { APPS, appById } = require('./apps')
 const DATA = require('./data')
 const profiles = require('./profiles')
 
@@ -157,9 +158,13 @@ class Session {
       case 'leave':
         return this.seat?.table.leave(this, now)
       case 'pick':
-        return this.seat?.table.pick(this, msg.n, now)
+        return this.seat?.table.pick(this, msg.id, now)
+      case 'flip':
+        return this.seat?.table.flip(this, msg.i, now)
       case 'guess':
-        return this.seat?.table.guess(this, msg.n, now)
+        return this.seat?.table.guess(this, msg.id, now)
+      case 'skip':
+        return this.seat?.table.skip(this, now)
       case 'bot':
         return this.room.requestBot(this, now)
       case 'emote':
@@ -276,6 +281,23 @@ class Session {
       if (!this.spend(pass.price)) return
       p.passes.push(pass.id)
       this.toast(`${pass.name} unlocked! ${pass.icon}`)
+    } else if (msg.kind === 'app') {
+      const app = appById(msg.id)
+      if (!app || p.ownedApps.includes(app.id)) return
+      if (!this.spend(app.price)) return
+      p.ownedApps.push(app.id)
+      profiles.addQuestEvent(p, 'buyapp', 1, now)
+      this.toast(`Unlocked ${app.name}! 📱`)
+    } else if (msg.kind === 'crate') {
+      const id = this.rollCrate()
+      if (!id) {
+        this.toast('You already own every app! 🏆')
+        return
+      }
+      if (!this.spend(DATA.appCrate.price)) return
+      p.ownedApps.push(id)
+      profiles.addQuestEvent(p, 'buyapp', 1, now)
+      this.send('unboxed', { id })
     } else if (msg.kind === 'starter') {
       if (p.starterPack) return
       const pack = DATA.starterPack
@@ -283,6 +305,7 @@ class Session {
       p.starterPack = true
       if (!p.ownedChairs.includes(pack.chair)) p.ownedChairs.push(pack.chair)
       for (const id of pack.emotes) if (!p.ownedEmotes.includes(id)) p.ownedEmotes.push(id)
+      for (const id of pack.apps || []) if (appById(id) && !p.ownedApps.includes(id)) p.ownedApps.push(id)
       this.toast('Starter Pack claimed! ⭐')
     } else {
       return
@@ -290,6 +313,30 @@ class Session {
     profiles.markDirty(this.profile)
     this.pushProfile(now)
     this.seat?.table.sync(now)
+  }
+
+  /**
+   * The App Crate's prize: an app this player doesn't own, its tier drawn by the
+   * crate's weights (only among tiers that still have something left). Null when
+   * every app is owned.
+   */
+  rollCrate() {
+    const owned = new Set(this.profile.ownedApps)
+    const left = APPS.filter((a) => !owned.has(a.id) && DATA.appCrate.weights[a.tier])
+    if (left.length === 0) return null
+    const tiers = [...new Set(left.map((a) => a.tier))]
+    const total = tiers.reduce((sum, t) => sum + DATA.appCrate.weights[t], 0)
+    let roll = Math.random() * total
+    let tier = tiers[tiers.length - 1]
+    for (const t of tiers) {
+      roll -= DATA.appCrate.weights[t]
+      if (roll <= 0) {
+        tier = t
+        break
+      }
+    }
+    const pool = left.filter((a) => a.tier === tier)
+    return pool[Math.floor(Math.random() * pool.length)].id
   }
 
   onEquip(msg, now) {

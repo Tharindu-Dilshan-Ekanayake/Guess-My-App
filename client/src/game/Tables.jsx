@@ -1,20 +1,13 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
-import {
-  BoxGeometry,
-  CanvasTexture,
-  MeshBasicMaterial,
-  MeshLambertMaterial,
-  PlaneGeometry,
-  SRGBColorSpace,
-} from 'three'
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
+import { BoxGeometry, MeshBasicMaterial, MeshLambertMaterial } from 'three'
 
 import { useGame } from '../net/gameStore'
 import { useCulled } from './culling'
-import { fontReady, GAME_FONT, Label } from './labels'
+import { Label } from './labels'
 import { chairById, DATA, RARITY_AURA, RARITY_COLORS, TABLE, seatPosition } from './layout'
 import { useSettings } from './quality'
 import Auras from './Aura'
+import Boards from './Boards'
 import {
   createChairCushionGeometry,
   createChairFrameGeometry,
@@ -29,40 +22,6 @@ import { useDisposable } from './useDisposable'
 /** An unclaimed seat: dark wood frame, cream cushion. */
 const EMPTY_CHAIR = '#6b4329'
 const EMPTY_CUSHION = '#e9dcc3'
-const PAPER_Y = TABLE.height + 0.001
-/** Where a number card stands on the table, relative to the table's centre. */
-const CARD_Z = -0.47
-const CARD_W = 0.46
-const CARD_H = 0.4
-/**
- * Each face of the tent card rises this far from flat (radians). Low enough that
- * the card never hides the seated players from the duel camera.
- */
-const CARD_TILT = 0.55
-const CARD_TEX_W = 256
-const CARD_TEX_H = 224
-
-/**
- * Stands a flat piece up as the front face of a tent card: hinged at its bottom
- * edge and leaning back, so it faces the duel camera on the table's -Z side.
- * Expects the piece flat (facing +Y) with its top towards +Z.
- */
-function standUp(geometry, lift = 0) {
-  return geometry.translate(0, lift, CARD_H / 2).rotateX(-CARD_TILT)
-}
-
-/** A white tent card: two leaning faces meeting at the top. */
-function createCardGeometry() {
-  const front = standUp(new BoxGeometry(CARD_W, 0.02, CARD_H), 0.01)
-  const back = standUp(new BoxGeometry(CARD_W, 0.02, CARD_H), 0.01)
-    .rotateY(Math.PI)
-    .translate(0, 0, 2 * CARD_H * Math.cos(CARD_TILT))
-  const merged = mergeGeometries([front, back])
-  front.dispose()
-  back.dispose()
-  return merged
-}
-
 /**
  * Everything of a desk below its top, in one geometry: a dark trim under the top's
  * edge, a frame (apron) joining the legs, four legs and a footrest bar.
@@ -91,7 +50,7 @@ const thronePlacement = SEATS.map((s) => ({ p: [s.x, 0, s.z], s: ZERO, c: '#ffff
 const gemPlacement = SEATS.map((s) => ({ p: [s.x, 0, s.z], s: ZERO, c: '#ffffff' }))
 
 /**
- * All ten tables: tops, legs, both chairs and both papers each, as four instanced
+ * All the tables: tops, legs, both chairs and both tile boards each, as instanced
  * meshes. The chair mesh also carries the display chairs in the chair shop, and
  * each seat's chair takes the colour of the chair its occupant has equipped.
  */
@@ -111,21 +70,15 @@ export function Tables() {
       throne: createThroneGeometry(),
       gems: createThroneGemGeometry(),
       gemMaterial: new MeshBasicMaterial({ color: '#ffffff' }),
-      paper: createCardGeometry(),
       wood: new MeshLambertMaterial({ color: '#b98256' }),
       darkWood: new MeshLambertMaterial({ color: '#4e3120' }),
       tinted: new MeshLambertMaterial({ color: '#ffffff' }),
-      paperMaterial: new MeshLambertMaterial({ color: '#fbfbf6' }),
     }),
     [],
   )
 
   const tops = useMemo(() => DATA.tables.map((t) => ({ p: [t.x, TABLE.height - 0.06, t.z] })), [])
   const legs = useMemo(() => DATA.tables.map((t) => ({ p: [t.x, 0, t.z] })), [])
-  const papers = useMemo(
-    () => SEATS.map((s) => ({ p: [s.x, PAPER_Y, s.table.z + CARD_Z] })),
-    [],
-  )
   const chairs = useMemo(
     () => [
       ...SEATS.map((s) => ({ p: [s.x, 0, s.z], c: EMPTY_CHAIR })),
@@ -171,7 +124,6 @@ export function Tables() {
     <>
       <Instanced geometry={res.top} material={res.wood} items={tops} castShadow={shadows} receiveShadow />
       <Instanced geometry={res.legs} material={res.darkWood} items={legs} castShadow={shadows} />
-      <Instanced geometry={res.paper} material={res.paperMaterial} items={papers} />
       <instancedMesh
         ref={chairsRef}
         args={[res.chair, res.tinted, chairs.length]}
@@ -184,7 +136,7 @@ export function Tables() {
       {DATA.tables.map((t) => (
         <TableLabel key={t.id} table={t} />
       ))}
-      <SeatPapers />
+      <Boards />
       {/* Seat auras are a nice-to-have: off on the LOW preset (which has no particles). */}
       {particles && <SeatAuras />}
     </>
@@ -226,24 +178,26 @@ function SeatAuras() {
   return <Auras items={items} />
 }
 
-function tableLines(table, weekend, now) {
-  const reward = DATA.winReward * (weekend ? 2 : 1)
+function tableLines(table, def, weekend, now) {
+  const mode = DATA.modes[def.mode] ?? DATA.modes.normal
+  const reward = mode.reward * (weekend ? 2 : 1)
+  const title = { text: mode.label, size: 46, color: mode.color }
   const prize = weekend
     ? { text: `Win $${reward} (x2)`, size: 34, rainbow: true }
     : { text: `Win $${reward}`, size: 34, color: '#5cff5c' }
   if (!table || table.phase === 'waiting') {
     const n = table ? table.seats.filter(Boolean).length : 0
-    return [{ text: `${n}/2 Players`, size: 40 }, prize]
+    return [title, { text: `${n}/2 Players`, size: 40 }, prize]
   }
   if (table.phase === 'countdown') {
-    return [{ text: `Starting in ${Math.max(1, Math.ceil((table.endsAt - now) / 1000))}`, size: 40 }]
+    return [title, { text: `Starting in ${Math.max(1, Math.ceil((table.endsAt - now) / 1000))}`, size: 40 }]
   }
   // Mid-duel the players' own speech bubbles say what's happening.
-  return []
+  return [title]
 }
 
 /**
- * "0/2 Players / Win $200" above a table. Polled, since the countdown ticks. Hidden
+ * "MEDIUM / 0/2 Players / Win $500" above a table. Polled, since the countdown ticks. Hidden
  * at the player's own table, where the HUD shows the same thing.
  */
 function TableLabel({ table }) {
@@ -253,119 +207,16 @@ function TableLabel({ table }) {
     const update = () => {
       const s = useGame.getState()
       label.set(
-        s.match?.table === table.id ? [] : tableLines(s.tables[table.id], s.profile?.weekend, Date.now()),
+        s.match?.table === table.id ? [] : tableLines(s.tables[table.id], table, s.profile?.weekend, Date.now()),
       )
     }
     update()
     const id = setInterval(update, 250)
     return () => clearInterval(id)
-  }, [label, table.id])
+  }, [label, table])
 
   useCulled(label.sprite, table.x, table.z, { label, group: 'tables' })
-  return <primitive object={label.sprite} position={[table.x, 3.3, table.z]} />
-}
-
-/**
- * The face of a number card: a small label and a big, dark number, drawn on a
- * transparent canvas over the white card. Sized and filtered to stay crisp at the
- * duel camera's angle even at 1x resolution (LOW).
- */
-function useCardTexture(label, text, color) {
-  const tex = useDisposable(() => {
-    const canvas = document.createElement('canvas')
-    canvas.width = CARD_TEX_W
-    canvas.height = CARD_TEX_H
-    const t = new CanvasTexture(canvas)
-    t.colorSpace = SRGBColorSpace
-    // Seen at an angle: anisotropic filtering keeps the digits sharp.
-    t.anisotropy = 8
-    return t
-  }, [])
-
-  useEffect(() => {
-    let cancelled = false
-    const draw = () => {
-      if (cancelled) return
-      const canvas = tex.image
-      const ctx = canvas.getContext('2d')
-      const w = CARD_TEX_W
-      const h = CARD_TEX_H
-      ctx.clearRect(0, 0, w, h)
-      ctx.textAlign = 'center'
-      ctx.textBaseline = 'middle'
-      ctx.lineJoin = 'round'
-
-      // Label strip across the top.
-      ctx.fillStyle = color
-      ctx.globalAlpha = 0.14
-      ctx.fillRect(10, 10, w - 20, 36)
-      ctx.globalAlpha = 1
-      ctx.font = `700 24px ${GAME_FONT}`
-      ctx.fillStyle = '#3a3f4b'
-      ctx.fillText(label, w / 2, 29)
-
-      if (text) {
-        const size = text.length > 2 ? 108 : 132
-        ctx.font = `700 ${size}px ${GAME_FONT}`
-        // A soft light halo, then the number in a strong dark colour.
-        ctx.lineWidth = 12
-        ctx.strokeStyle = '#ffffff'
-        ctx.strokeText(text, w / 2, h * 0.6)
-        ctx.fillStyle = color
-        ctx.fillText(text, w / 2, h * 0.6)
-      }
-      // Underline, like a number written on a form.
-      ctx.fillStyle = '#c9ccd3'
-      ctx.fillRect(40, h - 22, w - 80, 5)
-      tex.needsUpdate = true
-    }
-    fontReady.then(draw)
-    return () => {
-      cancelled = true
-    }
-  }, [tex, label, text, color])
-
-  return tex
-}
-
-/**
- * The two number cards at the player's own table: their number on their card, "?"
- * on the opponent's. Nobody else's cards show anything,
- * so this is never more than two extra draw calls.
- */
-function SeatPapers() {
-  const match = useGame((s) => s.match)
-  const playing = match && match.phase !== 'waiting' && match.phase !== 'countdown'
-
-  const mine = playing && match.myNumber != null ? String(match.myNumber) : ''
-  const theirs = playing && match.phase !== 'choosing' ? '?' : ''
-  const myTex = useCardTexture('YOUR NUMBER', mine, '#1d4ed8')
-  const theirTex = useCardTexture('THEIR NUMBER', theirs, '#dc2626')
-
-  // On the front face of the card, a hair in front of it.
-  const geometry = useDisposable(
-    () => standUp(new PlaneGeometry(CARD_W * 0.94, CARD_H * 0.94).rotateX(-Math.PI / 2).rotateY(Math.PI), 0.024),
-    [],
-  )
-  const materials = useDisposable(
-    () => ({
-      mine: new MeshBasicMaterial({ map: myTex, transparent: true, depthWrite: false }),
-      theirs: new MeshBasicMaterial({ map: theirTex, transparent: true, depthWrite: false }),
-    }),
-    [myTex, theirTex],
-  )
-
-  if (!playing) return null
-  const table = DATA.tables.find((t) => t.id === match.table)
-  const mySeat = seatPosition(table.id, match.seat)
-  const theirSeat = seatPosition(table.id, 1 - match.seat)
-
-  return (
-    <>
-      <mesh geometry={geometry} material={materials.mine} position={[mySeat.x, PAPER_Y, table.z + CARD_Z]} />
-      <mesh geometry={geometry} material={materials.theirs} position={[theirSeat.x, PAPER_Y, table.z + CARD_Z]} />
-    </>
-  )
+  return <primitive object={label.sprite} position={[table.x, 3.5, table.z]} />
 }
 
 export default Tables

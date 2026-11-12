@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 
 import { sfx } from '../audio/sfx'
 import { chairById, INTERACTABLES } from '../game/layout'
+import { isTyping } from '../game/useKeyboard'
 import { useTouch } from './touch'
 import { useGame } from '../net/gameStore'
 import { localPlayer } from '../net/liveState'
@@ -85,7 +86,7 @@ export function InteractPrompt() {
 
   useEffect(() => {
     const onKey = (e) => {
-      if (e.code === 'KeyE' && !e.repeat) trigger()
+      if (e.code === 'KeyE' && !e.repeat && !isTyping(e)) trigger()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)

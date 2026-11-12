@@ -328,6 +328,11 @@ export const sfx = {
   jump: play(() => {
     voice(260, 0, 0.18, { type: 'triangle', glide: 620, gain: 0.08 })
   }),
+  /** A tile flipping over: a papery flick and a soft tock. */
+  flip: play(() => {
+    noise(0, 0.07, { freq: 2600, freqEnd: 900, q: 1.2, gain: 0.12 })
+    voice(620, 0.03, 0.08, { type: 'triangle', glide: 380, gain: 0.1 })
+  }),
   /** A speech bubble / emote: a bubbly pop. */
   pop: play(() => {
     voice(500, 0, 0.09, { glide: 1300, gain: 0.1 })
