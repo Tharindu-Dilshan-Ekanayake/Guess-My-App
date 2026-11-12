@@ -5,6 +5,7 @@ import { Vector3 } from 'three'
 import { usePlatform } from '../bloxity/platform'
 import { useGame } from '../net/gameStore'
 import { localPlayer } from '../net/liveState'
+import { useTouch } from '../ui/touch'
 import { DATA, TABLE } from './layout'
 
 /** How high above the player's feet the camera aims. */
@@ -42,22 +43,23 @@ const TABLE_LOOK_HEIGHT = 1.15
 const TABLE_LOOK_HEIGHT_WIN = 1.9
 
 /**
- * Board view (choosing and guessing): above the table, looking almost straight down
- * at both boards, the seats at the top of the screen. Distance is fitted so this
- * much of the table stays in frame on any aspect ratio.
+ * Board view (choosing and guessing): above the table, looking almost straight down,
+ * the seats at the top of the screen. The camera distance is fitted so the framed
+ * area (width x depth, in world units) stays in view on any aspect ratio.
+ *
+ * Overview: both boards. Desktop always; phones while the opponent plays.
  */
-const BOARD_VIEW_WIDTH = 2.95
-const BOARD_VIEW_DEPTH = 2.55
+const OVERVIEW = { width: 2.95, depth: 2.8, aimZ: -0.16 }
 /**
- * Portrait phones: both boards side by side would make tiles too small to tap, so
- * the view frames only your own board (the opponent's progress is in the top bar).
+ * Focus: your own board, close up, on phones during your turn (portrait and
+ * landscape), so tiles are big enough to tap. The board takes a bit under half the
+ * screen height, between the duel bar on top and the GUESS / SKIP buttons below.
  */
-const PORTRAIT_ASPECT = 0.9
-const BOARD_VIEW_WIDTH_PORTRAIT = DATA.board.size + 0.3
+const FOCUS = { width: DATA.board.size + 0.3, depth: DATA.board.size / 0.45, aimZ: 0.02 }
+/** Below this screen side (CSS px) a mouse-driven window counts as a phone too. */
+const PHONE_MAX_SIDE = 600
 /** Tilt from straight down, in radians. */
 const BOARD_VIEW_TILT = 0.36
-/** Aim a little in front of the boards so they sit above the turn buttons. */
-const BOARD_VIEW_AIM_Z = -0.3
 const DEG = Math.PI / 180
 
 const _desired = new Vector3()
@@ -163,11 +165,15 @@ export function FollowCamera() {
     if (table && boardView) {
       const halfV = Math.tan((camera.fov * DEG) / 2)
       const halfH = halfV * camera.aspect
-      const portrait = camera.aspect < PORTRAIT_ASPECT
-      const width = portrait ? BOARD_VIEW_WIDTH_PORTRAIT : BOARD_VIEW_WIDTH
-      const d = Math.max(BOARD_VIEW_DEPTH / 2 / halfV, width / 2 / halfH)
-      const x = portrait ? table.x + (match.seat === 0 ? -1 : 1) * DATA.board.seatOffset : table.x
-      _target.set(x, TABLE.height, table.z + BOARD_VIEW_AIM_Z)
+      const phone =
+        useTouch.getState().touch || Math.min(window.innerWidth, window.innerHeight) < PHONE_MAX_SIDE
+      // Close in on your board for your turn, including while your guess is being
+      // checked; pull back to both boards while the opponent plays.
+      const focus = phone && match.phase === 'guessing' && !match.theirTurn
+      const view = focus ? FOCUS : OVERVIEW
+      const d = Math.max(view.depth / 2 / halfV, view.width / 2 / halfH)
+      const x = focus ? table.x + (match.seat === 0 ? -1 : 1) * DATA.board.seatOffset : table.x
+      _target.set(x, TABLE.height, table.z + view.aimZ)
       _desired.set(
         x,
         TABLE.height + d * Math.cos(BOARD_VIEW_TILT),
